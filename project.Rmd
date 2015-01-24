@@ -1,0 +1,88 @@
+
+---
+title: "Classification on Weight Lifting Exercise Dataset"
+author: "Bigdog"
+date: "23 January 2015"
+output: html_document
+---
+
+## Data preparation
+For simplicity, assume that you have downloaded the datasets into your local R working directory. After a quick check of the data, we find that some variables contain too much NAs. THerefore, our intuition of candidate variable selection for model building is that they should be related to "belt", "forearm", "arm", or "dumbell", and not contain NAs in the training set. 
+
+Then we extract a subset of the original training data with selected variables only. We refer this dataset as new training dataset in the rest of this report. 
+
+
+```{r}
+
+training<-read.csv("pml-training.csv")
+testing<-read.csv("pml-testing.csv")
+isNA<-sapply(training, function (x) any(is.na(x) | x == "")) #variable should not contain NA or empty values
+isRelated<-grepl("belt|[^(fore)]arm|dumbbell|forearm", names(training))
+candidateVariable<-names(training)[!isNA & isRelated]
+subTrain<-training[,c("classe",candidateVariable)] # subset of training data with selected variables only
+subTest<-testing[,candidateVariable] # subset of testing data with selected variables only
+```
+
+
+
+## Cross validation
+
+Using the new training dataset (subTrain), we randomly split it into 60% training and 40% probing datasets.
+
+```{r, cache=TRUE}
+set.seed(2350)
+inTrain <- createDataPartition(y = subTrain$classe, p=0.6,list=FALSE)
+trainData <- subTrain[inTrain,]
+testData<- subTrain[-inTrain,]
+```
+We run a 5-fold cross validation on **trainData** using random forest algorithm. For the outcome, as random forest tends to have good prediction performance, my expected out of sample error is 3% or less. 
+
+```{r, cache=TRUE}
+set.seed(12345)
+library("caret")
+train_control <- trainControl(method="cv", number=5)
+model <- train(classe~., data=trainData, trControl=train_control, method="rf", 
+               prox = TRUE, allowParallel = TRUE)
+#predictions <- predict(model, trainData[,-1])
+#confusionMatrix(predictions, trainData$classe)
+print(model$finalModel)
+```
+We can evaluate the out of sample error of the model. As showed above, we can see that the overall out of sample error is only 1.04% for 5-fold cross validation with random forest classification algorithm，which means a pretty good model has been built. 
+
+
+
+
+## Building a prediction model
+
+We will use **trainData** to build the training model, and investigate its performance of the prediction on **testData**. 
+
+```{r, cache=TRUE}
+
+train_control <- trainControl(classProbs=TRUE, savePredictions=TRUE,  allowParallel=TRUE)                  
+trainingModel <- train(classe ~ ., data=trainData, trControl=train_control, method="rf") # building model on training data
+predictions <- predict(trainingModel, newdata=testData) # predict on the testing data
+confusionMatrix(predictions, testData$classe)
+save(trainingModel, file="trainingModel.RData") # save the training data
+```
+
+Again, we can see very high prediction accuracy of 99.2% with random forest based classification model. 
+
+## Making prediction on the original testing data
+
+Using the model built from **trainData**, we can make prediction on the original testing dataset (20 tested cases) with selected variables only. 
+
+```{r, cache=TRUE}
+# make prediction on the original testing data with selected variables only
+pred <- predict(trainingModel, newdata = subTest)
+# Utility function provided by the instructor
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(pred)
+```
+We then upload the predicted results to the course website for evaluation of the 20 tested cases. It turns out that, the prediction model performs a perfect accuracy (100%),   that is, it correctly predicted all the 20 cases out of 20. 
